@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StreamYard Downloader — Broadcasts</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f0f4f8; }
+    .topbar { background: #fff; border-bottom: 1px solid #e5e7eb; }
+    .logo { font-size: 1.1rem; font-weight: 700; color: #2563eb; }
+    .table th { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }
+    #empty-row td { color: #9ca3af; font-style: italic; }
+    .badge-title { font-size: .95rem; font-weight: 400; }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<nav class="topbar px-4 py-3 d-flex align-items-center justify-content-between mb-4">
+  <span class="logo">StreamYard Downloader</span>
+  <a href="/auth/logout" class="text-muted small text-decoration-none">Sign out</a>
+</nav>
+
+<div class="container" style="max-width: 860px;">
+
+  <!-- Date range filter -->
+  <div class="card border-0 shadow-sm rounded-4 p-4 mb-4">
+    <div class="row g-3 align-items-end">
+      <div class="col-sm-5">
+        <label class="form-label text-muted small mb-1">From date</label>
+        <input type="date" id="from-date" class="form-control">
+      </div>
+      <div class="col-sm-5">
+        <label class="form-label text-muted small mb-1">To date</label>
+        <input type="date" id="to-date" class="form-control">
+      </div>
+      <div class="col-sm-2">
+        <button id="load-btn" class="btn btn-outline-primary w-100" onclick="loadBroadcasts()">Load</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Broadcast table -->
+  <div class="card border-0 shadow-sm rounded-4 p-4 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <span id="selected-count" class="fw-semibold">0</span>
+        <span class="text-muted small"> selected</span>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" onclick="toggleAll()">Select all</button>
+        <button id="download-btn" class="btn btn-sm btn-primary" onclick="startDownload()" disabled>
+          Download Selected
+        </button>
+      </div>
+    </div>
+
+    <div id="table-wrap">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th style="width:40px;"></th>
+            <th>Title</th>
+            <th style="width:110px;">Date</th>
+            <th style="width:180px;">Output filename stem</th>
+          </tr>
+        </thead>
+        <tbody id="broadcast-tbody">
+          <tr id="empty-row">
+            <td colspan="4" class="text-center py-4">
+              Set a date range and click Load to see broadcasts.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="loading" class="text-center py-4 d-none">
+      <div class="spinner-border spinner-border-sm text-primary me-2"></div>
+      <span class="text-muted">Loading broadcasts...</span>
+    </div>
+    <div id="error-msg" class="alert alert-danger mt-3 d-none"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  let broadcasts = [];
+
+  // Default date range: first day of current month → today
+  (function () {
+    const now = new Date();
+    const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0');
+    document.getElementById('from-date').value = `${y}-${m}-01`;
+    document.getElementById('to-date').value = now.toISOString().slice(0, 10);
+  })();
+
+  async function loadBroadcasts() {
+    const from = document.getElementById('from-date').value;
+    const to = document.getElementById('to-date').value;
+    const tbody = document.getElementById('broadcast-tbody');
+    const loading = document.getElementById('loading');
+    const errMsg = document.getElementById('error-msg');
+
+    tbody.innerHTML = '';
+    errMsg.classList.add('d-none');
+    loading.classList.remove('d-none');
+    document.getElementById('load-btn').disabled = true;
+
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set('from_date', from);
+      if (to) params.set('to_date', to);
+      const resp = await fetch(`/api/broadcasts?${params}`);
+      const data = await resp.json();
+
+      if (!resp.ok) throw new Error(data.error || 'Failed to load broadcasts');
+
+      broadcasts = data.broadcasts || [];
+      renderTable(broadcasts);
+    } catch (e) {
+      errMsg.textContent = e.message;
+      errMsg.classList.remove('d-none');
+    } finally {
+      loading.classList.add('d-none');
+      document.getElementById('load-btn').disabled = false;
+    }
+  }
+
+  function renderTable(items) {
+    const tbody = document.getElementById('broadcast-tbody');
+    if (!items.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted fst-italic">No broadcasts found in this date range.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = items.map((b, i) => `
+      <tr>
+        <td><input class="form-check-input" type="checkbox" value="${i}" onchange="updateCount()"></td>
+        <td class="badge-title">${escHtml(b.title)}</td>
+        <td class="text-muted small">${escHtml(b.display_date)}</td>
+        <td class="text-muted small font-monospace" style="font-size:.78rem;">${escHtml(b.name)}</td>
+      </tr>
+    `).join('');
+    updateCount();
+  }
+
+  function updateCount() {
+    const checked = document.querySelectorAll('#broadcast-tbody input[type=checkbox]:checked');
+    document.getElementById('selected-count').textContent = checked.length;
+    document.getElementById('download-btn').disabled = checked.length === 0;
+  }
+
+  let allSelected = false;
+  function toggleAll() {
+    allSelected = !allSelected;
+    document.querySelectorAll('#broadcast-tbody input[type=checkbox]').forEach(cb => cb.checked = allSelected);
+    updateCount();
+  }
+
+  async function startDownload() {
+    const checked = [...document.querySelectorAll('#broadcast-tbody input[type=checkbox]:checked')];
+    const selected = checked.map(cb => broadcasts[parseInt(cb.value)]);
+
+    document.getElementById('download-btn').disabled = true;
+    document.getElementById('download-btn').textContent = 'Starting...';
+
+    try {
+      const resp = await fetch('/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({broadcasts: selected}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed to start download');
+      window.location.href = `/progress/${data.batch_id}`;
+    } catch (e) {
+      alert('Error: ' + e.message);
+      document.getElementById('download-btn').disabled = false;
+      document.getElementById('download-btn').textContent = 'Download Selected';
+    }
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>

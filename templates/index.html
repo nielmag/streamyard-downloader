@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StreamYard Downloader — Sign In</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f0f4f8; }
+    .card { border: none; box-shadow: 0 4px 20px rgba(0,0,0,.1); }
+    .logo { font-size: 1.4rem; font-weight: 700; color: #2563eb; }
+    .step-badge { background: #2563eb; color: #fff; border-radius: 50%; width: 28px; height: 28px;
+                  display: inline-flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+<div class="min-vh-100 d-flex align-items-center justify-content-center p-3">
+  <div class="card rounded-4 p-4" style="width:100%;max-width:440px;">
+
+    <div class="text-center mb-4">
+      <div class="logo mb-1">StreamYard Downloader</div>
+      <small class="text-muted">Download recordings, transcripts &amp; manuscripts</small>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible py-2" role="alert">
+      {{ error }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    {% if step == "email" %}
+    <!-- Step 1: enter email -->
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <span class="step-badge">1</span>
+      <span class="fw-semibold">Enter your StreamYard email</span>
+    </div>
+    <form method="post" action="/auth/request">
+      <div class="mb-3">
+        <label class="form-label text-muted small">Email address</label>
+        <input type="email" name="email" class="form-control form-control-lg" placeholder="you@example.com"
+               autofocus required>
+      </div>
+      <button type="submit" class="btn btn-primary w-100 py-2">Send Code</button>
+    </form>
+
+    {% elif step == "otp" %}
+    <!-- Step 2: enter OTP -->
+    <div class="d-flex align-items-center gap-2 mb-1">
+      <span class="step-badge">2</span>
+      <span class="fw-semibold">Check your email for a code</span>
+    </div>
+    <p class="text-muted small mb-3">We sent a login code to <strong>{{ email }}</strong></p>
+    <form method="post" action="/auth/verify">
+      <div class="mb-3">
+        <label class="form-label text-muted small">6-digit code</label>
+        <input type="text" name="otp" class="form-control form-control-lg text-center"
+               placeholder="123456" maxlength="10" autofocus required autocomplete="one-time-code">
+      </div>
+      <button type="submit" class="btn btn-primary w-100 py-2">Verify &amp; Sign In</button>
+    </form>
+    <div class="text-center mt-3">
+      <a href="/" class="text-muted small">← Use a different email</a>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

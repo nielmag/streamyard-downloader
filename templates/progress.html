@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StreamYard Downloader — Progress</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f0f4f8; }
+    .topbar { background: #fff; border-bottom: 1px solid #e5e7eb; }
+    .logo { font-size: 1.1rem; font-weight: 700; color: #2563eb; }
+    .status-badge { display: inline-block; padding: .25em .7em; border-radius: 999px; font-size: .78rem; font-weight: 600; }
+    .status-pending    { background: #f3f4f6; color: #6b7280; }
+    .status-downloading { background: #dbeafe; color: #1d4ed8; }
+    .status-transcribing { background: #ede9fe; color: #6d28d9; }
+    .status-manuscript { background: #fef9c3; color: #854d0e; }
+    .status-in_progress { background: #dbeafe; color: #1d4ed8; }
+    .status-done       { background: #dcfce7; color: #15803d; }
+    .status-error      { background: #fee2e2; color: #b91c1c; }
+    .msg-text          { font-size: .85rem; color: #6b7280; }
+  </style>
+</head>
+<body>
+
+<nav class="topbar px-4 py-3 d-flex align-items-center justify-content-between mb-4">
+  <span class="logo">StreamYard Downloader</span>
+  <a href="/broadcasts" class="text-muted small text-decoration-none">← Back to broadcasts</a>
+</nav>
+
+<div class="container" style="max-width: 860px;">
+  <h5 class="mb-3 fw-semibold">Download Progress</h5>
+
+  <div id="overall-msg" class="alert alert-info py-2 small d-none"></div>
+
+  <div class="card border-0 shadow-sm rounded-4 p-4">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">Broadcast</th>
+          <th style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;width:130px;">Status</th>
+          <th style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">Message</th>
+        </tr>
+      </thead>
+      <tbody id="progress-tbody">
+        <tr><td colspan="3" class="text-center py-4 text-muted">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="done-banner" class="mt-4 d-none">
+    <div class="alert alert-success">
+      <strong>All done!</strong>
+      Files saved to: <span id="output-dir" class="font-monospace"></span>
+    </div>
+    <a href="/broadcasts" class="btn btn-outline-primary">Download more</a>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  const BATCH_ID = {{ batch_id | tojson }};
+  let pollTimer = null;
+
+  const STATUS_LABELS = {
+    pending:      'Pending',
+    downloading:  'Downloading',
+    transcribing: 'Transcribing',
+    manuscript:   'Manuscript',
+    in_progress:  'In Progress',
+    done:         'Done ✓',
+    error:        'Error',
+  };
+
+  async function poll() {
+    try {
+      const resp = await fetch(`/progress/${BATCH_ID}/status`);
+      const data = await resp.json();
+      if (!resp.ok) return;
+
+      const items = data.items || [];
+      renderTable(items);
+
+      const allDone = items.every(i => i.status === 'done' || i.status === 'error');
+      if (allDone) {
+        clearInterval(pollTimer);
+        document.getElementById('done-banner').classList.remove('d-none');
+        document.getElementById('output-dir').textContent = data.output_dir || '';
+      }
+    } catch (_) {}
+  }
+
+  function renderTable(items) {
+    const tbody = document.getElementById('progress-tbody');
+    tbody.innerHTML = items.map(item => {
+      const statusClass = `status-${item.status}`;
+      const label = STATUS_LABELS[item.status] || item.status;
+      const spinner = (item.status !== 'done' && item.status !== 'error' && item.status !== 'pending')
+        ? '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span>'
+        : '';
+      return `
+        <tr>
+          <td>
+            <div class="fw-medium">${escHtml(item.name || item.title || item.broadcast_id)}</div>
+          </td>
+          <td>
+            <span class="status-badge ${statusClass}">${spinner}${escHtml(label)}</span>
+          </td>
+          <td class="msg-text">${escHtml(item.message || '')}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  poll();
+  pollTimer = setInterval(poll, 3000);
+</script>
+</body>
+</html>
