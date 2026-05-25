@@ -23,6 +23,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
 
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "outputs"))
+MANUSCRIPT_DIR = Path(os.environ.get("MANUSCRIPT_DIR", "")) if os.environ.get("MANUSCRIPT_DIR") else OUTPUT_DIR
 ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
@@ -88,7 +89,7 @@ def _process_batch(batch_id: str) -> None:
 
         video_path = OUTPUT_DIR / f"{name}.mp4"
         vtt_path = OUTPUT_DIR / f"{name} Transcript.vtt"
-        docx_path = OUTPUT_DIR / f"{name} Manuscript.docx"
+        docx_path = MANUSCRIPT_DIR / f"{name} Manuscript.docx"
         cache_dir = CACHE_DIR / bid
 
         def cb(msg: str, _bid=bid, _batch_id=batch_id) -> None:
@@ -251,6 +252,7 @@ def download():
         return jsonify({"error": "No broadcasts selected"}), 400
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    MANUSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     batch_id = str(uuid.uuid4())

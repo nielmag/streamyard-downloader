@@ -107,13 +107,19 @@ def vtt_to_manuscript(
         status_callback("Generating manuscript with Claude...")
 
     client = anthropic.Anthropic(api_key=api_key)
-    message = client.messages.create(
-        model=model,
-        max_tokens=8192,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"TRANSCRIPT:\n{transcript_text}"}],
-    )
-    manuscript_text = message.content[0].text
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=8192,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": f"TRANSCRIPT:\n{transcript_text}"}],
+        )
+        manuscript_text = message.content[0].text
+    except anthropic.BadRequestError as exc:
+        # Claude's content filter blocked the request — save the raw transcript instead
+        if status_callback:
+            status_callback("Claude blocked this content — saving raw transcript as manuscript...")
+        manuscript_text = transcript_text
 
     _write_docx(title, manuscript_text, docx_dest)
 

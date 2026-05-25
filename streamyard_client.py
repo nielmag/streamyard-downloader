@@ -308,7 +308,7 @@ class StreamYardClient:
                         mb = downloaded / 1024 / 1024
                         status_callback(f"Downloading... {pct}% ({mb:.0f} MB)")
 
-        tmp_path.rename(dest_path)
+        tmp_path.replace(dest_path)  # replace() overwrites if dest already exists
 
         if status_callback:
             mb = dest_path.stat().st_size / 1024 / 1024
