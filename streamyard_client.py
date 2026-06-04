@@ -15,7 +15,11 @@ SESSION_FILE = Path(__file__).parent / "session.pkl"
 class StreamYardClient:
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.265 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
         self.csrf_token: str | None = None
         self._pending_email: str | None = None
         self._workspace_id: str | None = None
@@ -60,23 +64,62 @@ class StreamYardClient:
     def _refresh_csrf(self) -> str:
         """Fetch the login page to get a fresh csrfToken cookie."""
         resp = self.session.get(f"{BASE_URL}/login", timeout=15)
+        try:
+            with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
+                f.write(f"[streamyard] refresh_csrf status={resp.status_code}\n")
+        except Exception:
+            pass
         resp.raise_for_status()
         token = self._cookie("csrfToken")
         if not token:
             raise RuntimeError("Could not retrieve CSRF token from StreamYard")
         self.csrf_token = token
+        try:
+            with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
+                f.write(f"[streamyard] refresh_csrf token={token}\n")
+        except Exception:
+            pass
         return token
 
     def request_otp(self, email: str) -> None:
         """Send an OTP code to the given email address."""
         csrf = self._refresh_csrf()
+        headers = {
+            "Referer": f"{BASE_URL}/login",
+            "Origin": BASE_URL,
+            "Accept": "application/json, text/plain, */*",
+            "X-Requested-With": "XMLHttpRequest",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
+        }
+        try:
+            with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
+                f.write(f"[streamyard] request_otp email={email} csrf={csrf}\n")
+        except Exception:
+            pass
         resp = self.session.post(
             f"{BASE_URL}/api/user/login",
             json={"email": email, "csrfToken": csrf},
-            headers={"Referer": f"{BASE_URL}/login"},
+            headers=headers,
             timeout=15,
         )
-        resp.raise_for_status()
+        body_text = resp.text or ""
+        try:
+            with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
+                f.write(f"[streamyard] request_otp status={resp.status_code}\n")
+                f.write(f"[streamyard] request_otp body={body_text[:2000]}\n")
+        except Exception:
+            pass
+        print(f"[streamyard] request_otp status={resp.status_code}", flush=True)
+        print(f"[streamyard] request_otp body={body_text[:1000]}", flush=True)
+        if not resp.ok:
+            try:
+                data = resp.json()
+                msg = data.get("error") or data.get("message") or body_text
+            except Exception:
+                msg = body_text or f"HTTP {resp.status_code}"
+            raise RuntimeError(f"StreamYard error {resp.status_code}: {msg}")
         self._pending_email = email
 
     def verify_otp(self, otp: str) -> tuple[bool, str]:
@@ -118,11 +161,11 @@ class StreamYardClient:
         # Non-2xx — try to extract an error message from the body
         try:
             body = resp.json()
-            msg = body.get("error") or body.get("message") or f"StreamYard returned {resp.status_code}"
+            msg = body.get("error") or body.get("message") or body
         except Exception:
-            msg = f"StreamYard returned {resp.status_code}: {resp.text[:200]}"
+            msg = resp.text or f"StreamYard returned {resp.status_code}"
 
-        return False, msg
+        return False, f"{msg} (HTTP {resp.status_code})"
 
     def _get_team_id(self) -> str | None:
         """Fetch the user's team/organisation ID from the StreamYard API."""

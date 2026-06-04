@@ -3,6 +3,7 @@ StreamYard Downloader — Flask web app.
 Browse your StreamYard video library, select by date range, and download
 video + transcript + manuscript in one click.
 """
+import logging
 import os
 import re
 import threading
@@ -18,6 +19,11 @@ from streamyard_client import StreamYardClient
 from transcriber import transcribe_to_vtt
 
 load_dotenv()
+logging.basicConfig(
+    filename=Path(__file__).parent / 'service.log',
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s',
+)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
@@ -136,13 +142,23 @@ def index():
 @app.route("/auth/request", methods=["POST"])
 def auth_request():
     email = request.form.get("email", "").strip()
+    print(f"[app] /auth/request received email='{email}'", flush=True)
+    logging.info(f"[app] /auth/request received email='{email}'")
     if not email:
         return render_template("index.html", step="email", error="Please enter your email.")
     try:
         sy_client.request_otp(email)
+        print(f"[app] /auth/request request_otp called for {email}", flush=True)
+        logging.info(f"[app] /auth/request request_otp called for {email}")
         session["pending_email"] = email
         return render_template("index.html", step="otp", email=email)
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        print(f"[app] auth_request error: {exc}", flush=True)
+        logging.error(f"[app] auth_request error: {exc}")
+        with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
+            f.write(f"[app] auth_request error: {exc}\n")
         return render_template("index.html", step="email", error=str(exc))
 
 
@@ -150,6 +166,8 @@ def auth_request():
 def auth_verify():
     otp = request.form.get("otp", "").strip()
     email = session.get("pending_email", "")
+    print(f"[app] /auth/verify received otp='{otp}' for email='{email}'", flush=True)
+    logging.info(f"[app] /auth/verify received otp='{otp}' for email='{email}'")
     if not otp:
         return render_template("index.html", step="otp", email=email,
                                error="Please enter the code from your email.")
@@ -301,4 +319,7 @@ def progress_status(batch_id: str):
 
 if __name__ == "__main__":
     # use_reloader=False prevents Flask from killing background download threads on file changes
-    app.run(debug=True, port=5001, use_reloader=False)
+    # bind to 0.0.0.0 so remote browsers can reach the server
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "5001"))
+    app.run(debug=True, host=host, port=port, use_reloader=False)

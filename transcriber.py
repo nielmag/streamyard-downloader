@@ -1,13 +1,9 @@
 """
 Transcription pipeline: video file → AssemblyAI → WebVTT file.
-Reuses the existing assemblyai_transcribe.py from the webapp.
 """
-import sys
 from pathlib import Path
 
-# Make the parent webapp accessible for import
-sys.path.insert(0, str(Path(__file__).parent.parent / "webapp"))
-from assemblyai_transcribe import transcribe_with_assemblyai  # noqa: E402
+from assemblyai_transcribe import transcribe_with_assemblyai
 
 
 def _seconds_to_vtt_time(s: float) -> str:
@@ -82,8 +78,7 @@ def transcribe_to_vtt(
         status_callback("Transcribing with AssemblyAI (1-5 minutes)...")
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    whisper_result = transcribe_with_assemblyai(video_path, cache_dir, api_key, status_callback)
-    vtt_content = whisper_to_vtt(whisper_result)
+    vtt_content = transcribe_with_assemblyai(video_path, cache_dir, api_key, status_callback)
     vtt_dest.parent.mkdir(parents=True, exist_ok=True)
     vtt_dest.write_text(vtt_content, encoding="utf-8")
 

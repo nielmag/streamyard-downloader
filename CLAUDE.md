@@ -55,6 +55,20 @@ Always restart the service for changes to take effect:
 & $nssm restart StreamYardDownloader
 ```
 
+## Debugging and best practices
+
+- When testing manually, run the app with unbuffered output so logs appear immediately:
+  ```powershell
+  python -u app.py
+  ```
+- Confirm the exact port the app is running on. If the terminal says `Running on http://127.0.0.1:5002`, open that URL in the browser, not `5001`.
+- Do not navigate directly to `http://127.0.0.1:<port>/auth/request` in the browser. That endpoint only accepts POST requests and will return `405 Method Not Allowed` when opened by GET.
+- Always open the root app URL first, then use the login form.
+- If the browser still shows the old app behavior after a code change, an old Python/Flask process may still be running on the same port. Check active listeners and stop stale processes before retrying.
+- Use the terminal output and `service.log` to diagnose problems. The browser network panel only shows requests to the local app, not the internal StreamYard API calls.
+- For auth failures, a `404` response from StreamYard usually means the email was not recognized. Use the exact StreamYard account email.
+- If you change code, make sure the process currently running is the updated one. Stale ports and duplicate Python servers are the most common source of repeated failures.
+
 ## Architecture
 
 ```
@@ -141,6 +155,29 @@ Claude is prompted as a sermon/teaching manuscript editor:
 - Preserve all theological content and scripture references
 - Add `##` section headings at natural breaks
 - Output full manuscript (not a summary)
+
+## Recent debugging notes / known startup issues
+- The VM was refusing browser connections because the Flask app never successfully started.
+- The first crash was `ModuleNotFoundError: No module named 'docx'` because `python-docx` was missing from the runtime environment.
+- After installing dependencies, the next crash was `ModuleNotFoundError: No module named 'assemblyai_transcribe'`.
+- `transcriber.py` had a legacy import path that assumed a separate `webapp/assemblyai_transcribe.py` file existed.
+- That file was not present in this standalone `streamyard_app` workspace, so the import failed before the app could bind the port.
+- The browser error `161.35.50.28 refused to connect` was therefore a symptom of the app crashing immediately, not a firewall or VM network issue.
+- Fix applied: added a local `assemblyai_transcribe.py` helper and updated `transcriber.py` to import it directly.
+- Fix applied: updated the fallback path so AssemblyAI returns real VTT text and `transcribe_to_vtt()` saves it correctly.
+- Always verify local startup first with `curl -v http://127.0.0.1:5001` on the VM before debugging remote access.
+- For remote use, the app must bind to `0.0.0.0` and use the correct `PORT=5001`; otherwise the browser will refuse the connection.
+
+## Quick Ubuntu VM run checklist
+1. `cd /root/streamyard_app`
+2. `python3 -m venv venv`
+3. `source venv/bin/activate`
+4. `pip install -r requirements.txt`
+5. `python -u app.py`
+6. In the VM shell, verify locally with `curl -v http://127.0.0.1:5001`
+7. Open browser at `http://<vm-ip>:5001`
+
+If the app crashes, read the first traceback and fix that before testing remote access.
 
 ## Environment Variables (`.env`)
 
