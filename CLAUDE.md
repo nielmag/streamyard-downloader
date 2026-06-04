@@ -168,16 +168,67 @@ Claude is prompted as a sermon/teaching manuscript editor:
 - Always verify local startup first with `curl -v http://127.0.0.1:5001` on the VM before debugging remote access.
 - For remote use, the app must bind to `0.0.0.0` and use the correct `PORT=5001`; otherwise the browser will refuse the connection.
 
-## Quick Ubuntu VM run checklist
-1. `cd /root/streamyard_app`
-2. `python3 -m venv venv`
-3. `source venv/bin/activate`
-4. `pip install -r requirements.txt`
-5. `python -u app.py`
-6. In the VM shell, verify locally with `curl -v http://127.0.0.1:5001`
-7. Open browser at `http://<vm-ip>:5001`
+## Cloud VM Deployment (DigitalOcean)
 
-If the app crashes, read the first traceback and fix that before testing remote access.
+The app is deployed on a DigitalOcean droplet (Ubuntu 24.04 LTS):
+- **IP:** `161.35.50.28`
+- **URL:** `http://161.35.50.28:5001`
+- **Code location:** `/root/streamyard_new`
+- **GitHub repo:** `https://github.com/nielmag/streamyard-downloader` (public)
+- **Runs as:** systemd service named `streamyard`
+
+### Manage the service (SSH in first)
+```bash
+ssh root@161.35.50.28
+systemctl status streamyard
+systemctl restart streamyard
+systemctl stop streamyard
+journalctl -u streamyard -f   # live logs
+```
+
+### Deploy code changes
+```bash
+ssh root@161.35.50.28
+cd /root/streamyard_new
+git pull
+systemctl restart streamyard
+```
+
+### First-time setup on a fresh VM
+```bash
+git clone https://github.com/nielmag/streamyard-downloader.git ~/streamyard_new
+cd ~/streamyard_new
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp /path/to/saved.env .env   # restore API keys
+
+# Create systemd service
+cat > /etc/systemd/system/streamyard.service << 'EOF'
+[Unit]
+Description=StreamYard Downloader
+After=network.target
+
+[Service]
+WorkingDirectory=/root/streamyard_new
+ExecStart=/root/streamyard_new/venv/bin/python -u app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload && systemctl enable streamyard && systemctl start streamyard
+```
+
+### Notes
+- The `.env` file is not in git — back it up before destroying/rebuilding the droplet (`cp .env /tmp/` then restore after clone)
+- GitHub repo is public so no token needed to clone
+- The app binds to `0.0.0.0:5001` — make sure port 5001 is open in DigitalOcean's firewall if connections are refused
+- `session.pkl` (StreamYard auth cookies) is also not in git — after a fresh deploy you must log in once via the browser
+
+If the app crashes, check `journalctl -u streamyard -n 50` for the traceback before testing remote access.
 
 ## Environment Variables (`.env`)
 
