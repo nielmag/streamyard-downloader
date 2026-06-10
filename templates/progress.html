@@ -38,7 +38,7 @@
         <tr>
           <th style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">Broadcast</th>
           <th style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;width:130px;">Status</th>
-          <th style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">Message</th>
+          <th style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;">Message / Downloads</th>
         </tr>
       </thead>
       <tbody id="progress-tbody">
@@ -97,6 +97,18 @@
       const spinner = (item.status !== 'done' && item.status !== 'error' && item.status !== 'pending')
         ? '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span>'
         : '';
+
+      let msgCell = `<span class="msg-text">${escHtml(item.message || '')}</span>`;
+      if (item.status === 'done') {
+        const base = `/files/${BATCH_ID}/${item.broadcast_id}`;
+        msgCell = `
+          <div class="d-flex flex-wrap gap-2 mt-1">
+            <a href="${base}/video" class="btn btn-sm btn-outline-primary">Download Video</a>
+            <a href="${base}/transcript" class="btn btn-sm btn-outline-secondary">Download Transcript</a>
+            <a href="${base}/manuscript" class="btn btn-sm btn-outline-secondary">Download Manuscript</a>
+          </div>`;
+      }
+
       return `
         <tr>
           <td>
@@ -105,7 +117,7 @@
           <td>
             <span class="status-badge ${statusClass}">${spinner}${escHtml(label)}</span>
           </td>
-          <td class="msg-text">${escHtml(item.message || '')}</td>
+          <td>${msgCell}</td>
         </tr>
       `;
     }).join('');

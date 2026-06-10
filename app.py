@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from manuscript import vtt_to_manuscript
 from streamyard_client import StreamYardClient
@@ -313,6 +313,32 @@ def progress_status(batch_id: str):
     if not batch:
         return jsonify({"error": "Not found"}), 404
     return jsonify({"items": batch["items"], "output_dir": str(OUTPUT_DIR)})
+
+
+@app.route("/files/<batch_id>/<broadcast_id>/<filetype>")
+def download_file(batch_id: str, broadcast_id: str, filetype: str):
+    with batches_lock:
+        batch = batches.get(batch_id)
+    if not batch:
+        return "Batch not found", 404
+    item = next((i for i in batch["items"] if i["broadcast_id"] == broadcast_id), None)
+    if not item:
+        return "Item not found", 404
+
+    name = item["name"]
+    if filetype == "video":
+        path = OUTPUT_DIR / f"{name}.mp4"
+    elif filetype == "transcript":
+        path = OUTPUT_DIR / f"{name} Transcript.vtt"
+    elif filetype == "manuscript":
+        path = MANUSCRIPT_DIR / f"{name} Manuscript.docx"
+    else:
+        return "Unknown file type", 400
+
+    if not path.exists():
+        return "File not found on server", 404
+
+    return send_file(path, as_attachment=True)
 
 
 # ------------------------------------------------------------------
