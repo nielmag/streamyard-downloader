@@ -145,6 +145,19 @@ All three outputs are cached — re-running skips completed steps.
 ### Content filter fallback
 If Claude's API blocks manuscript generation (HTTP 400 `invalid_request_error` / "Output blocked by content filtering policy"), `manuscript.py` catches `anthropic.BadRequestError` and writes the raw transcript text into the Word doc instead. The broadcast completes as Done rather than Error.
 
+### AssemblyAI SDK version
+`assemblyai_transcribe.py` uses the modern SDK API (`assemblyai>=0.17`):
+```python
+aai.settings.api_key = api_key
+transcriber = aai.Transcriber(config=aai.TranscriptionConfig(...))
+transcript = transcriber.transcribe(str(video_path))
+vtt_text = transcript.export_subtitles_vtt(chars_per_caption=30)
+```
+The old internal `Client`/`api`/`types` interface was removed in SDK v0.17+ — do not revert to it.
+
+### File downloads (progress page)
+When a broadcast completes, the progress page shows **Download Video**, **Download Transcript**, and **Download Manuscript** buttons. These call `GET /files/<batch_id>/<broadcast_id>/<filetype>` (filetype: `video`, `transcript`, `manuscript`) which uses `send_file()` to stream the file to the browser. This is the intended way for cloud VM users to retrieve their files — the output directory on the VM is not otherwise accessible.
+
 ### Windows Service
 The service runs `venv\Scripts\python.exe` (not the system Python) so all packages in `venv/` are always available regardless of which user account runs the service. If packages change, re-run `venv\Scripts\pip install -r requirements.txt` and restart the service.
 
@@ -156,17 +169,12 @@ Claude is prompted as a sermon/teaching manuscript editor:
 - Add `##` section headings at natural breaks
 - Output full manuscript (not a summary)
 
-## Recent debugging notes / known startup issues
-- The VM was refusing browser connections because the Flask app never successfully started.
-- The first crash was `ModuleNotFoundError: No module named 'docx'` because `python-docx` was missing from the runtime environment.
-- After installing dependencies, the next crash was `ModuleNotFoundError: No module named 'assemblyai_transcribe'`.
-- `transcriber.py` had a legacy import path that assumed a separate `webapp/assemblyai_transcribe.py` file existed.
-- That file was not present in this standalone `streamyard_app` workspace, so the import failed before the app could bind the port.
-- The browser error `161.35.50.28 refused to connect` was therefore a symptom of the app crashing immediately, not a firewall or VM network issue.
-- Fix applied: added a local `assemblyai_transcribe.py` helper and updated `transcriber.py` to import it directly.
-- Fix applied: updated the fallback path so AssemblyAI returns real VTT text and `transcribe_to_vtt()` saves it correctly.
+## Known issues / debugging notes
 - Always verify local startup first with `curl -v http://127.0.0.1:5001` on the VM before debugging remote access.
 - For remote use, the app must bind to `0.0.0.0` and use the correct `PORT=5001`; otherwise the browser will refuse the connection.
+- If transcription fails with "Could not resolve authentication method", check that both `ASSEMBLYAI_API_KEY` and `ANTHROPIC_API_KEY` are set in `.env` on the VM. Both are required — AssemblyAI for transcription fallback, Anthropic for manuscript generation.
+- The `assemblyai_transcribe.py` module uses the modern SDK API (v0.64+). The old `Client`/`api`/`types` interface no longer exists in that package.
+- StreamYard broadcasts that were recorded but have no hosted transcript (e.g. some live streams) will always fall back to AssemblyAI — `ASSEMBLYAI_API_KEY` is required for those.
 
 ## Cloud VM Deployment (DigitalOcean)
 
