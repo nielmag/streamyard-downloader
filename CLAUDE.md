@@ -9,9 +9,12 @@ Separate from the main `video-pipeline` webapp (port 5000).
 
 ## Output
 
-- **Video + transcript** → `OUTPUT_DIR` in `.env` (e.g. `E:\Trumpters Call Mar-May 2026`)
-- **Manuscripts** → `MANUSCRIPT_DIR` in `.env` (e.g. `C:\Users\nielm\OneDrive\ENM New\Dominion Manuscripts`)
-  - Falls back to `OUTPUT_DIR` if `MANUSCRIPT_DIR` is not set
+Videos, transcripts, and manuscripts each save to their own configurable folder, set from the **Settings** page in the browser (`/settings`) — not `.env`. Changes apply immediately to the next batch; no service restart needed.
+
+- Settings are persisted to `settings.json` (gitignored, alongside `session.pkl`), managed by `settings.py` (`load_settings()` / `save_settings()`).
+- Defaults (used the first time, before `settings.json` exists) live in `settings.py:DEFAULTS`.
+- The Settings page's folder picker is a server-side directory browser (`GET /api/browse`) — browsers don't expose real filesystem paths from a native OS picker, so this is a custom "click through folders" UI instead.
+- Each batch snapshots the three paths at `/download` time into `batches[batch_id]["dirs"]`, so a settings change mid-processing never mixes folders within one batch, and `/files/...` downloads always match what `_process_batch` actually used.
 
 Files named:
 ```
@@ -50,10 +53,13 @@ venv\Scripts\python app.py    # http://localhost:5001
 
 ## After code changes
 
-Always restart the service for changes to take effect:
-```powershell
-& $nssm restart StreamYardDownloader
-```
+Restart the service for changes to take effect. The service runs as `LocalSystem`, which has full privilege to control its own Windows Service without any UAC prompt — so the app can restart itself:
+
+- **Primary method:** click **⟳ Restart App** in the browser topbar (calls `POST /admin/restart`, which fires `nssm restart` as a detached subprocess). No PowerShell, no admin window, ever.
+- **Fallback** (if the app is unreachable/hung and can't serve the button click), from an admin PowerShell:
+  ```powershell
+  & $nssm restart StreamYardDownloader
+  ```
 
 ## Debugging and best practices
 
@@ -73,13 +79,15 @@ Always restart the service for changes to take effect:
 
 ```
 streamyard_app/
-├── app.py                  # Flask routes (auth, broadcast list, download, progress)
+├── app.py                  # Flask routes (auth, broadcast list, download, progress, admin/settings)
+├── settings.py             # load_settings()/save_settings() — video/transcript/manuscript folders
 ├── streamyard_client.py    # StreamYard API client
 ├── transcriber.py          # Transcript: StreamYard VTT first, AssemblyAI fallback
 ├── manuscript.py           # VTT → Claude → Word doc (.docx); falls back to raw transcript on content filter
 ├── requirements.txt
 ├── install-service.ps1     # One-time Windows Service installer (run as admin)
-├── .env                    # API keys + OUTPUT_DIR + MANUSCRIPT_DIR (not committed)
+├── .env                    # API keys + SECRET_KEY (not committed)
+├── settings.json           # Configured output folders (auto-generated, not committed)
 ├── session.pkl             # StreamYard session cookies (auto-generated, not committed)
 ├── service.log             # Service stdout/stderr log (not committed)
 ├── venv/                   # Python virtual environment (not committed)
@@ -88,8 +96,16 @@ streamyard_app/
 └── templates/
     ├── index.html          # Email + OTP login
     ├── broadcasts.html     # Date-filtered broadcast list with checkboxes
-    └── progress.html       # Live per-broadcast progress polling
+    ├── progress.html       # Live per-broadcast progress polling
+    ├── settings.html       # Output folder configuration + in-app folder browser
+    └── _admin_bar.html     # Shared partial: Restart App + Settings links (included in topbars)
 ```
+
+## Admin routes
+
+- `POST /admin/restart` — restarts the Windows Service from within the app itself (see "After code changes" above). Gated behind `_is_logged_in()`.
+- `GET /settings` / `POST /settings` — view/save the three output folders (`settings.py`).
+- `GET /api/browse?path=<p>` — lists subdirectories of `<p>` (or drive letters when `<p>` is empty) as JSON; powers the Settings page's folder browser.
 
 ## StreamYard API (reverse-engineered)
 
@@ -245,6 +261,6 @@ If the app crashes, check `journalctl -u streamyard -n 50` for the traceback bef
 | `ASSEMBLYAI_API_KEY` | AssemblyAI transcription (fallback only) |
 | `ANTHROPIC_API_KEY` | Claude API for manuscript generation |
 | `CLAUDE_MODEL` | Default: `claude-sonnet-4-6` |
-| `OUTPUT_DIR` | Output folder for video + transcript (e.g. `E:\Trumpters Call Mar-May 2026`) |
-| `MANUSCRIPT_DIR` | Output folder for manuscripts (e.g. `C:\Users\nielm\OneDrive\ENM New\Dominion Manuscripts`); falls back to `OUTPUT_DIR` if unset |
 | `SECRET_KEY` | Flask session secret |
+
+Output folders (video/transcript/manuscript) are **not** set via `.env` — see the "Output" section above; they're configured from the `/settings` page and persisted to `settings.json`.

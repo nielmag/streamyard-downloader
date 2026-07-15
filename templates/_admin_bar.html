@@ -1,0 +1,26 @@
+<a href="/settings" class="text-muted small text-decoration-none me-3">⚙ Settings</a>
+<button type="button" class="btn btn-sm btn-outline-secondary" onclick="restartApp()">⟳ Restart App</button>
+<span id="restart-status" class="text-muted small ms-2"></span>
+
+<script>
+  async function restartApp() {
+    if (!confirm('This restarts the app and interrupts any download/transcribe/manuscript job currently in progress. Continue?')) return;
+    const status = document.getElementById('restart-status');
+    status.textContent = 'Restarting…';
+    try {
+      await fetch('/admin/restart', { method: 'POST' });
+    } catch (e) {}
+    setTimeout(pollAfterRestart, 3000);
+  }
+
+  async function pollAfterRestart() {
+    try {
+      const resp = await fetch(window.location.pathname, { cache: 'no-store' });
+      if (resp.ok) {
+        window.location.reload();
+        return;
+      }
+    } catch (e) {}
+    setTimeout(pollAfterRestart, 1000);
+  }
+</script>

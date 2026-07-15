@@ -24,7 +24,10 @@
 
 <nav class="topbar px-4 py-3 d-flex align-items-center justify-content-between mb-4">
   <span class="logo">StreamYard Downloader</span>
-  <a href="/broadcasts" class="text-muted small text-decoration-none">← Back to broadcasts</a>
+  <div class="d-flex align-items-center">
+    {% include "_admin_bar.html" %}
+    <a href="/broadcasts" class="text-muted small text-decoration-none ms-3">← Back to broadcasts</a>
+  </div>
 </nav>
 
 <div class="container" style="max-width: 860px;">
@@ -50,7 +53,11 @@
   <div id="done-banner" class="mt-4 d-none">
     <div class="alert alert-success">
       <strong>All done!</strong>
-      Files saved to: <span id="output-dir" class="font-monospace"></span>
+      <div class="small mt-1">
+        Videos: <span id="video-dir" class="font-monospace"></span><br>
+        Transcripts: <span id="transcript-dir" class="font-monospace"></span><br>
+        Manuscripts: <span id="manuscript-dir" class="font-monospace"></span>
+      </div>
     </div>
     <a href="/broadcasts" class="btn btn-outline-primary">Download more</a>
   </div>
@@ -84,7 +91,10 @@
       if (allDone) {
         clearInterval(pollTimer);
         document.getElementById('done-banner').classList.remove('d-none');
-        document.getElementById('output-dir').textContent = data.output_dir || '';
+        const dirs = data.dirs || {};
+        document.getElementById('video-dir').textContent = dirs.video_dir || '';
+        document.getElementById('transcript-dir').textContent = dirs.transcript_dir || '';
+        document.getElementById('manuscript-dir').textContent = dirs.manuscript_dir || '';
       }
     } catch (_) {}
   }

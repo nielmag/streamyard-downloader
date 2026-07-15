@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StreamYard Downloader — Settings</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f0f4f8; }
+    .topbar { background: #fff; border-bottom: 1px solid #e5e7eb; }
+    .logo { font-size: 1.1rem; font-weight: 700; color: #2563eb; }
+    .path-box { font-family: monospace; font-size: .85rem; background: #f8fafc; border: 1px solid #e5e7eb;
+                border-radius: .375rem; padding: .5rem .75rem; word-break: break-all; }
+    #browse-list { max-height: 320px; overflow-y: auto; }
+    #browse-list .list-group-item { cursor: pointer; }
+    #browse-current { font-family: monospace; font-size: .8rem; }
+  </style>
+</head>
+<body>
+
+<nav class="topbar px-4 py-3 d-flex align-items-center justify-content-between mb-4">
+  <span class="logo">StreamYard Downloader</span>
+  <a href="/broadcasts" class="text-muted small text-decoration-none">← Back to broadcasts</a>
+</nav>
+
+<div class="container" style="max-width: 720px;">
+  <h5 class="mb-3 fw-semibold">Output Folders</h5>
+  <p class="text-muted small mb-4">Where every future download saves videos, transcripts, and manuscripts. Changes apply immediately — no restart needed.</p>
+
+  <div id="save-msg" class="alert d-none py-2 small"></div>
+
+  <div class="card border-0 shadow-sm rounded-4 p-4 mb-3">
+    <label class="form-label fw-semibold small">Videos</label>
+    <div class="d-flex gap-2 align-items-start">
+      <div id="video_dir-box" class="path-box flex-grow-1">{{ dirs.video_dir }}</div>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openBrowser('video_dir')">Change</button>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm rounded-4 p-4 mb-3">
+    <label class="form-label fw-semibold small">Transcripts</label>
+    <div class="d-flex gap-2 align-items-start">
+      <div id="transcript_dir-box" class="path-box flex-grow-1">{{ dirs.transcript_dir }}</div>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openBrowser('transcript_dir')">Change</button>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm rounded-4 p-4 mb-4">
+    <label class="form-label fw-semibold small">Manuscripts</label>
+    <div class="d-flex gap-2 align-items-start">
+      <div id="manuscript_dir-box" class="path-box flex-grow-1">{{ dirs.manuscript_dir }}</div>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openBrowser('manuscript_dir')">Change</button>
+    </div>
+  </div>
+
+  <button id="save-btn" class="btn btn-primary" onclick="saveSettings()">Save</button>
+</div>
+
+<!-- Folder browser modal -->
+<div class="modal fade" id="browseModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Choose a folder</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="browse-current" class="text-muted mb-2"></div>
+        <div id="browse-error" class="alert alert-danger py-2 small d-none"></div>
+        <div id="browse-list" class="list-group"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="browse-up-btn" onclick="browseUp()">↑ Up</button>
+        <button type="button" class="btn btn-primary btn-sm" id="browse-select-btn" onclick="selectCurrentFolder()">Select this folder</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  let browseTarget = null;
+  let currentPath = '';
+  let currentParent = null;
+  let browseModal;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    browseModal = new bootstrap.Modal(document.getElementById('browseModal'));
+  });
+
+  function openBrowser(target) {
+    browseTarget = target;
+    const startPath = document.getElementById(target + '-box').textContent.trim();
+    loadDir(startPath);
+    browseModal.show();
+  }
+
+  async function loadDir(path) {
+    const errBox = document.getElementById('browse-error');
+    errBox.classList.add('d-none');
+    try {
+      const resp = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        errBox.textContent = data.error || 'Could not open that folder.';
+        errBox.classList.remove('d-none');
+        return;
+      }
+      currentPath = data.path;
+      currentParent = data.parent;
+      document.getElementById('browse-current').textContent = currentPath || 'Drives';
+      document.getElementById('browse-up-btn').disabled = !currentPath;
+      document.getElementById('browse-select-btn').disabled = !currentPath;
+
+      const list = document.getElementById('browse-list');
+      if (!data.dirs.length) {
+        list.innerHTML = '<div class="text-muted small fst-italic px-2 py-3">No subfolders here.</div>';
+        return;
+      }
+      list.innerHTML = data.dirs.map(d => `
+        <button type="button" class="list-group-item list-group-item-action" onclick="loadDir(${JSON.stringify(d)})">
+          📁 ${escHtml(d.split('\\').pop() || d)}
+        </button>
+      `).join('');
+    } catch (e) {
+      errBox.textContent = 'Error: ' + e.message;
+      errBox.classList.remove('d-none');
+    }
+  }
+
+  function browseUp() {
+    if (!currentPath) return;
+    loadDir(currentParent !== null ? currentParent : '');
+  }
+
+  function selectCurrentFolder() {
+    if (!currentPath) return;
+    document.getElementById(browseTarget + '-box').textContent = currentPath;
+    browseModal.hide();
+  }
+
+  async function saveSettings() {
+    const btn = document.getElementById('save-btn');
+    const msg = document.getElementById('save-msg');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    msg.classList.add('d-none');
+
+    const payload = {
+      video_dir: document.getElementById('video_dir-box').textContent.trim(),
+      transcript_dir: document.getElementById('transcript_dir-box').textContent.trim(),
+      manuscript_dir: document.getElementById('manuscript_dir-box').textContent.trim(),
+    };
+
+    try {
+      const resp = await fetch('/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed to save');
+      msg.className = 'alert alert-success py-2 small';
+      msg.textContent = 'Saved. New downloads will use these folders.';
+      msg.classList.remove('d-none');
+    } catch (e) {
+      msg.className = 'alert alert-danger py-2 small';
+      msg.textContent = e.message;
+      msg.classList.remove('d-none');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>

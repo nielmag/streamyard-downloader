@@ -1,5 +1,6 @@
 .env
 session.pkl
+settings.json
 cache/
 __pycache__/
 *.pyc

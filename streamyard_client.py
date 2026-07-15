@@ -2,11 +2,14 @@
 StreamYard API client — reverse-engineered internal API.
 Handles email OTP auth, broadcast listing, and video download.
 """
+import logging
 import pickle
 import time
 from pathlib import Path
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://streamyard.com"
 SESSION_FILE = Path(__file__).parent / "session.pkl"
@@ -63,6 +66,10 @@ class StreamYardClient:
 
     def _refresh_csrf(self) -> str:
         """Fetch the login page to get a fresh csrfToken cookie."""
+        # Drop any stale cookies from a previous session first — a leftover
+        # expired jwt/csrfToken pair merged with the fresh ones below causes
+        # StreamYard to send duplicate jwt cookies and reject with 401.
+        self.session.cookies.clear()
         resp = self.session.get(f"{BASE_URL}/login", timeout=15)
         try:
             with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
@@ -111,8 +118,8 @@ class StreamYardClient:
                 f.write(f"[streamyard] request_otp body={body_text[:2000]}\n")
         except Exception:
             pass
-        print(f"[streamyard] request_otp status={resp.status_code}", flush=True)
-        print(f"[streamyard] request_otp body={body_text[:1000]}", flush=True)
+        logger.info(f"[streamyard] request_otp status={resp.status_code}")
+        logger.info(f"[streamyard] request_otp body={body_text[:1000]}")
         if not resp.ok:
             try:
                 data = resp.json()
@@ -141,9 +148,9 @@ class StreamYardClient:
             timeout=15,
         )
 
-        print(f"[streamyard] verify_otp status={resp.status_code}")
-        print(f"[streamyard] verify_otp body={resp.text[:500]}")
-        print(f"[streamyard] cookies after verify={[(c.name, c.value[:20]) for c in self.session.cookies]}")
+        logger.info(f"[streamyard] verify_otp status={resp.status_code}")
+        logger.info(f"[streamyard] verify_otp body={resp.text[:500]}")
+        logger.info(f"[streamyard] cookies after verify={[(c.name, c.value[:20]) for c in self.session.cookies]}")
 
         if resp.ok:
             try:
@@ -173,15 +180,15 @@ class StreamYardClient:
         for endpoint in ("/api/teams", "/api/user/teams", "/api/organizations"):
             try:
                 resp = self.session.get(f"{BASE_URL}{endpoint}", timeout=15)
-                print(f"[streamyard] teams endpoint {endpoint} → {resp.status_code}")
+                logger.info(f"[streamyard] teams endpoint {endpoint} → {resp.status_code}")
                 if resp.ok:
                     data = resp.json()
-                    print(f"[streamyard] teams data: {str(data)[:500]}")
+                    logger.info(f"[streamyard] teams data: {str(data)[:500]}")
                     teams = data.get("teams") or data.get("organizations") or (data if isinstance(data, list) else [])
                     if teams:
                         return teams[0].get("id")
             except Exception as e:
-                print(f"[streamyard] teams endpoint {endpoint} error: {e}")
+                logger.info(f"[streamyard] teams endpoint {endpoint} error: {e}")
 
         # Fall back to user info (print full response to find team field)
         for endpoint in ("/api/user", "/api/me"):
@@ -189,7 +196,7 @@ class StreamYardClient:
                 resp = self.session.get(f"{BASE_URL}{endpoint}", timeout=15)
                 if resp.ok:
                     data = resp.json()
-                    print(f"[streamyard] FULL user info: {data}")
+                    logger.info(f"[streamyard] FULL user info: {data}")
                     self._workspace_id = data.get("primaryWorkspace")
                     team_id = (
                         data.get("primaryTeam")
@@ -239,7 +246,7 @@ class StreamYardClient:
         broadcasts = data.get("broadcasts") or data.get("items") or (data if isinstance(data, list) else [])
         # Log first broadcast to help identify transcript fields
         if broadcasts:
-            print(f"[streamyard] sample broadcast keys: {list(broadcasts[0].keys())}")
+            logger.info(f"[streamyard] sample broadcast keys: {list(broadcasts[0].keys())}")
         return broadcasts
 
     # ------------------------------------------------------------------
@@ -268,7 +275,7 @@ class StreamYardClient:
                     headers=headers,
                     timeout=20,
                 )
-                print(f"[streamyard] POST {base}/vod type={type_} → {resp.status_code}")
+                logger.info(f"[streamyard] POST {base}/vod type={type_} → {resp.status_code}")
                 if not resp.ok:
                     continue
 
@@ -284,13 +291,13 @@ class StreamYardClient:
                     f"{base}/vod_download_urls?type={type_}",
                     timeout=20,
                 )
-                print(f"[streamyard] GET vod_download_urls type={type_} → {urls_resp.status_code} {urls_resp.text[:200]}")
+                logger.info(f"[streamyard] GET vod_download_urls type={type_} → {urls_resp.status_code} {urls_resp.text[:200]}")
                 if urls_resp.ok:
                     data = urls_resp.json()
                     return (data.get("videoUrl") or data.get("captionsUrl")
                             or data.get("transcriptUrl") or data.get("url"))
             except Exception as e:
-                print(f"[streamyard] _vod_url error for {base}: {e}")
+                logger.info(f"[streamyard] _vod_url error for {base}: {e}")
 
         return None
 

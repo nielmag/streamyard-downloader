@@ -19,7 +19,10 @@
 <!-- Top bar -->
 <nav class="topbar px-4 py-3 d-flex align-items-center justify-content-between mb-4">
   <span class="logo">StreamYard Downloader</span>
-  <a href="/auth/logout" class="text-muted small text-decoration-none">Sign out</a>
+  <div class="d-flex align-items-center">
+    {% include "_admin_bar.html" %}
+    <a href="/auth/logout" class="text-muted small text-decoration-none ms-3">Sign out</a>
+  </div>
 </nav>
 
 <div class="container" style="max-width: 860px;">

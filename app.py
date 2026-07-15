@@ -6,6 +6,7 @@ video + transcript + manuscript in one click.
 import logging
 import os
 import re
+import subprocess
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from manuscript import vtt_to_manuscript
+from settings import load_settings, save_settings
 from streamyard_client import StreamYardClient
 from transcriber import transcribe_to_vtt
 
@@ -28,12 +30,13 @@ logging.basicConfig(
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
 
-OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "outputs"))
-MANUSCRIPT_DIR = Path(os.environ.get("MANUSCRIPT_DIR", "")) if os.environ.get("MANUSCRIPT_DIR") else OUTPUT_DIR
 ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 CACHE_DIR = Path(__file__).parent / "cache"
+
+NSSM_PATH = r"C:\Users\nielm\AppData\Local\Microsoft\WinGet\Packages\NSSM.NSSM_Microsoft.Winget.Source_8wekyb3d8bbwe\nssm-2.24-101-g897c7ad\win64\nssm.exe"
+SERVICE_NAME = "StreamYardDownloader"
 
 # Single StreamYard client instance (personal app — single user)
 sy_client = StreamYardClient()
@@ -88,14 +91,19 @@ def _process_batch(batch_id: str) -> None:
     """Process every item in a batch sequentially in a background thread."""
     with batches_lock:
         items = list(batches[batch_id]["items"])
+        dirs = batches[batch_id]["dirs"]
+
+    video_dir = Path(dirs["video_dir"])
+    transcript_dir = Path(dirs["transcript_dir"])
+    manuscript_dir = Path(dirs["manuscript_dir"])
 
     for item in items:
         bid = item["broadcast_id"]
         name = item["name"]
 
-        video_path = OUTPUT_DIR / f"{name}.mp4"
-        vtt_path = OUTPUT_DIR / f"{name} Transcript.vtt"
-        docx_path = MANUSCRIPT_DIR / f"{name} Manuscript.docx"
+        video_path = video_dir / f"{name}.mp4"
+        vtt_path = transcript_dir / f"{name} Transcript.vtt"
+        docx_path = manuscript_dir / f"{name} Manuscript.docx"
         cache_dir = CACHE_DIR / bid
 
         def cb(msg: str, _bid=bid, _batch_id=batch_id) -> None:
@@ -117,7 +125,7 @@ def _process_batch(batch_id: str) -> None:
             _update_item(batch_id, bid, "manuscript", "Generating manuscript with Claude...")
             vtt_to_manuscript(vtt_path, name, docx_path, ANTHROPIC_API_KEY, CLAUDE_MODEL, status_callback=cb)
 
-            _update_item(batch_id, bid, "done", f"Saved to {OUTPUT_DIR}")
+            _update_item(batch_id, bid, "done", f"Saved to {video_dir}")
 
         except Exception as exc:
             _update_item(batch_id, bid, "error", str(exc))
@@ -269,8 +277,9 @@ def download():
     if not selected:
         return jsonify({"error": "No broadcasts selected"}), 400
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    MANUSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+    dirs = load_settings()
+    for key in ("video_dir", "transcript_dir", "manuscript_dir"):
+        Path(dirs[key]).mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     batch_id = str(uuid.uuid4())
@@ -287,7 +296,7 @@ def download():
     ]
 
     with batches_lock:
-        batches[batch_id] = {"items": items}
+        batches[batch_id] = {"items": items, "dirs": dirs}
 
     thread = threading.Thread(target=_process_batch, args=(batch_id,), daemon=True)
     thread.start()
@@ -312,7 +321,7 @@ def progress_status(batch_id: str):
         batch = batches.get(batch_id)
     if not batch:
         return jsonify({"error": "Not found"}), 404
-    return jsonify({"items": batch["items"], "output_dir": str(OUTPUT_DIR)})
+    return jsonify({"items": batch["items"], "dirs": batch["dirs"]})
 
 
 @app.route("/files/<batch_id>/<broadcast_id>/<filetype>")
@@ -326,12 +335,13 @@ def download_file(batch_id: str, broadcast_id: str, filetype: str):
         return "Item not found", 404
 
     name = item["name"]
+    dirs = batch["dirs"]
     if filetype == "video":
-        path = OUTPUT_DIR / f"{name}.mp4"
+        path = Path(dirs["video_dir"]) / f"{name}.mp4"
     elif filetype == "transcript":
-        path = OUTPUT_DIR / f"{name} Transcript.vtt"
+        path = Path(dirs["transcript_dir"]) / f"{name} Transcript.vtt"
     elif filetype == "manuscript":
-        path = MANUSCRIPT_DIR / f"{name} Manuscript.docx"
+        path = Path(dirs["manuscript_dir"]) / f"{name} Manuscript.docx"
     else:
         return "Unknown file type", 400
 
@@ -339,6 +349,80 @@ def download_file(batch_id: str, broadcast_id: str, filetype: str):
         return "File not found on server", 404
 
     return send_file(path, as_attachment=True)
+
+
+# ------------------------------------------------------------------
+# Routes — admin
+# ------------------------------------------------------------------
+
+@app.route("/admin/restart", methods=["POST"])
+def admin_restart():
+    if not _is_logged_in():
+        return jsonify({"error": "Not authenticated"}), 401
+    subprocess.Popen(
+        [NSSM_PATH, "restart", SERVICE_NAME],
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        close_fds=True,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/settings")
+def settings_page():
+    if not _is_logged_in():
+        return redirect(url_for("index"))
+    return render_template("settings.html", dirs=load_settings())
+
+
+@app.route("/settings", methods=["POST"])
+def settings_save():
+    if not _is_logged_in():
+        return jsonify({"error": "Not authenticated"}), 401
+    data = request.get_json(silent=True) or {}
+    dirs = {
+        "video_dir": data.get("video_dir", "").strip(),
+        "transcript_dir": data.get("transcript_dir", "").strip(),
+        "manuscript_dir": data.get("manuscript_dir", "").strip(),
+    }
+    for key, value in dirs.items():
+        if not value or not os.path.isabs(value):
+            return jsonify({"error": f"{key} must be an absolute path"}), 400
+    try:
+        for value in dirs.values():
+            Path(value).mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return jsonify({"error": f"Could not create folder: {exc}"}), 400
+    save_settings(dirs)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/browse")
+def api_browse():
+    if not _is_logged_in():
+        return jsonify({"error": "Not authenticated"}), 401
+
+    path = request.args.get("path", "")
+
+    if not path:
+        # Root view: list available drive letters
+        drives = [f"{c}:\\" for c in "CDEFGH" if os.path.exists(f"{c}:\\")]
+        return jsonify({"path": "", "parent": None, "dirs": drives})
+
+    try:
+        p = Path(path)
+        if not p.is_dir():
+            return jsonify({"error": "Not a directory"}), 400
+        entries = []
+        for child in sorted(p.iterdir(), key=lambda x: x.name.lower()):
+            try:
+                if child.is_dir():
+                    entries.append(str(child))
+            except OSError:
+                continue
+        parent = str(p.parent) if p.parent != p else None
+        return jsonify({"path": str(p), "parent": parent, "dirs": entries})
+    except (OSError, PermissionError) as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 # ------------------------------------------------------------------
