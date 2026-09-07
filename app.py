@@ -4,6 +4,8 @@ Browse your StreamYard video library, select by date range, and download
 video + transcript + manuscript in one click.
 """
 import logging
+import hmac
+import json
 import os
 import re
 import subprocess
@@ -34,9 +36,11 @@ ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 CACHE_DIR = Path(__file__).parent / "cache"
+STATE_FILE = Path(__file__).parent / "job-state.json"
 
 NSSM_PATH = r"C:\Users\nielm\AppData\Local\Microsoft\WinGet\Packages\NSSM.NSSM_Microsoft.Winget.Source_8wekyb3d8bbwe\nssm-2.24-101-g897c7ad\win64\nssm.exe"
 SERVICE_NAME = "StreamYardDownloader"
+SITE_API_TOKEN = os.environ.get("SITE_API_TOKEN", "")
 
 # Single StreamYard client instance (personal app — single user)
 sy_client = StreamYardClient()
@@ -44,6 +48,46 @@ sy_client = StreamYardClient()
 # In-memory batch state
 batches: dict[str, dict] = {}
 batches_lock = threading.Lock()
+
+
+def _save_batches() -> None:
+    """Atomically retain job state so a service restart does not erase the queue."""
+    with batches_lock:
+        state = json.dumps(batches)
+    temporary = STATE_FILE.with_suffix(".tmp")
+    temporary.write_text(state, encoding="utf-8")
+    temporary.replace(STATE_FILE)
+
+
+def _load_batches() -> None:
+    if not STATE_FILE.exists():
+        return
+    try:
+        saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        if isinstance(saved, dict):
+            with batches_lock:
+                batches.update(saved)
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.warning("Could not restore saved job state: %s", exc)
+
+
+def _site_authorized() -> bool:
+    supplied = request.headers.get("Authorization", "").removeprefix("Bearer ")
+    return bool(SITE_API_TOKEN) and hmac.compare_digest(supplied, SITE_API_TOKEN)
+
+
+def _start_batch(selected: list[dict]) -> str:
+    dirs = load_settings()
+    for key in ("video_dir", "transcript_dir", "manuscript_dir"):
+        Path(dirs[key]).mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    batch_id = str(uuid.uuid4())
+    items = [{"broadcast_id": b["id"], "name": b["name"], "title": b["title"], "display_date": b["display_date"], "status": "pending", "message": "Waiting..."} for b in selected]
+    with batches_lock:
+        batches[batch_id] = {"items": items, "dirs": dirs}
+    _save_batches()
+    threading.Thread(target=_process_batch, args=(batch_id,), daemon=True).start()
+    return batch_id
 
 
 # ------------------------------------------------------------------
@@ -81,6 +125,7 @@ def _update_item(batch_id: str, broadcast_id: str, status: str, message: str) ->
                 item["status"] = status
                 item["message"] = message
                 break
+    _save_batches()
 
 
 # ------------------------------------------------------------------
@@ -98,6 +143,8 @@ def _process_batch(batch_id: str) -> None:
     manuscript_dir = Path(dirs["manuscript_dir"])
 
     for item in items:
+        if item["status"] == "done":
+            continue
         bid = item["broadcast_id"]
         name = item["name"]
 
@@ -262,6 +309,52 @@ def api_broadcasts():
     return jsonify({"broadcasts": results})
 
 
+@app.route("/site/broadcasts")
+def site_broadcasts():
+    """List recordings for the private Site; StreamYard session remains on this worker."""
+    if not _site_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    from_date_str = request.args.get("from_date", "")
+    to_date_str = request.args.get("to_date", "")
+    try:
+        raw = sy_client.list_broadcasts()
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    results = []
+    for b in raw:
+        if b.get("status", "") not in ("ended", "complete", "completed", ""):
+            continue
+        started_at = b.get("startedAt", "")
+        if not started_at:
+            continue
+        try:
+            dt = datetime.fromisoformat(started_at.replace("Z", "+00:00")).astimezone()
+        except ValueError:
+            continue
+        if from_date_str:
+            try:
+                if dt.date() < datetime.strptime(from_date_str, "%Y-%m-%d").date():
+                    continue
+            except ValueError:
+                pass
+        if to_date_str:
+            try:
+                if dt.date() > datetime.strptime(to_date_str, "%Y-%m-%d").date():
+                    continue
+            except ValueError:
+                pass
+        results.append({
+            "id": b.get("id"),
+            "title": b.get("title", "Untitled"),
+            "started_at": started_at,
+            "display_date": dt.strftime("%-m/%-d/%y") if os.name != "nt" else dt.strftime("%#m/%#d/%y"),
+            "name": _build_name(b.get("title", "Untitled"), started_at),
+        })
+    return jsonify({"broadcasts": results})
+
+
 # ------------------------------------------------------------------
 # Routes — download
 # ------------------------------------------------------------------
@@ -297,6 +390,7 @@ def download():
 
     with batches_lock:
         batches[batch_id] = {"items": items, "dirs": dirs}
+    _save_batches()
 
     thread = threading.Thread(target=_process_batch, args=(batch_id,), daemon=True)
     thread.start()
@@ -307,6 +401,33 @@ def download():
 # ------------------------------------------------------------------
 # Routes — progress
 # ------------------------------------------------------------------
+
+@app.route("/site/jobs", methods=["POST"])
+def site_start_job():
+    if not _site_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    selected = (request.get_json(silent=True) or {}).get("broadcasts", [])
+    if not selected:
+        return jsonify({"error": "No broadcasts selected"}), 400
+    return jsonify({"batch_id": _start_batch(selected)})
+
+
+@app.route("/site/jobs/<batch_id>")
+def site_job_status(batch_id: str):
+    if not _site_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    with batches_lock:
+        batch = batches.get(batch_id)
+    if not batch:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify({"items": batch["items"]})
+
+
+@app.route("/site/files/<batch_id>/<broadcast_id>/<filetype>")
+def site_file(batch_id: str, broadcast_id: str, filetype: str):
+    if not _site_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return download_file(batch_id, broadcast_id, filetype)
 
 @app.route("/progress/<batch_id>")
 def progress(batch_id: str):
@@ -349,6 +470,12 @@ def download_file(batch_id: str, broadcast_id: str, filetype: str):
         return "File not found on server", 404
 
     return send_file(path, as_attachment=True)
+
+
+_load_batches()
+for _saved_batch_id, _saved_batch in list(batches.items()):
+    if any(item.get("status") not in ("done", "error") for item in _saved_batch.get("items", [])):
+        threading.Thread(target=_process_batch, args=(_saved_batch_id,), daemon=True).start()
 
 
 # ------------------------------------------------------------------
