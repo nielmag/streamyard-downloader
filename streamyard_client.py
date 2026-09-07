@@ -81,11 +81,6 @@ class StreamYardClient:
         if not token:
             raise RuntimeError("Could not retrieve CSRF token from StreamYard")
         self.csrf_token = token
-        try:
-            with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
-                f.write(f"[streamyard] refresh_csrf token={token}\n")
-        except Exception:
-            pass
         return token
 
     def request_otp(self, email: str) -> None:
@@ -100,11 +95,6 @@ class StreamYardClient:
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Dest": "empty",
         }
-        try:
-            with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
-                f.write(f"[streamyard] request_otp email={email} csrf={csrf}\n")
-        except Exception:
-            pass
         resp = self.session.post(
             f"{BASE_URL}/api/user/login",
             json={"email": email, "csrfToken": csrf},
@@ -115,11 +105,9 @@ class StreamYardClient:
         try:
             with open(Path(__file__).parent / 'service.log', 'a', encoding='utf-8') as f:
                 f.write(f"[streamyard] request_otp status={resp.status_code}\n")
-                f.write(f"[streamyard] request_otp body={body_text[:2000]}\n")
         except Exception:
             pass
         logger.info(f"[streamyard] request_otp status={resp.status_code}")
-        logger.info(f"[streamyard] request_otp body={body_text[:1000]}")
         if not resp.ok:
             try:
                 data = resp.json()
@@ -149,8 +137,6 @@ class StreamYardClient:
         )
 
         logger.info(f"[streamyard] verify_otp status={resp.status_code}")
-        logger.info(f"[streamyard] verify_otp body={resp.text[:500]}")
-        logger.info(f"[streamyard] cookies after verify={[(c.name, c.value[:20]) for c in self.session.cookies]}")
 
         if resp.ok:
             try:

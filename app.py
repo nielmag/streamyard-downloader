@@ -197,14 +197,10 @@ def index():
 @app.route("/auth/request", methods=["POST"])
 def auth_request():
     email = request.form.get("email", "").strip()
-    print(f"[app] /auth/request received email='{email}'", flush=True)
-    logging.info(f"[app] /auth/request received email='{email}'")
     if not email:
         return render_template("index.html", step="email", error="Please enter your email.")
     try:
         sy_client.request_otp(email)
-        print(f"[app] /auth/request request_otp called for {email}", flush=True)
-        logging.info(f"[app] /auth/request request_otp called for {email}")
         session["pending_email"] = email
         return render_template("index.html", step="otp", email=email)
     except Exception as exc:
@@ -221,8 +217,6 @@ def auth_request():
 def auth_verify():
     otp = request.form.get("otp", "").strip()
     email = session.get("pending_email", "")
-    print(f"[app] /auth/verify received otp='{otp}' for email='{email}'", flush=True)
-    logging.info(f"[app] /auth/verify received otp='{otp}' for email='{email}'")
     if not otp:
         return render_template("index.html", step="otp", email=email,
                                error="Please enter the code from your email.")
@@ -353,6 +347,40 @@ def site_broadcasts():
             "name": _build_name(b.get("title", "Untitled"), started_at),
         })
     return jsonify({"broadcasts": results})
+
+
+@app.route("/site/auth/status")
+def site_auth_status():
+    if not _site_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({"connected": sy_client.is_authenticated()})
+
+
+@app.route("/site/auth/request", methods=["POST"])
+def site_auth_request():
+    if not _site_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    email = (request.get_json(silent=True) or {}).get("email", "").strip()
+    if not email or "@" not in email:
+        return jsonify({"error": "Enter a valid StreamYard email address."}), 400
+    try:
+        sy_client.request_otp(email)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({"ok": True})
+
+
+@app.route("/site/auth/verify", methods=["POST"])
+def site_auth_verify():
+    if not _site_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    otp = (request.get_json(silent=True) or {}).get("otp", "").strip()
+    if not otp:
+        return jsonify({"error": "Enter the sign-in code."}), 400
+    ok, error = sy_client.verify_otp(otp)
+    if not ok:
+        return jsonify({"error": error or "Could not verify the StreamYard code."}), 400
+    return jsonify({"ok": True})
 
 
 # ------------------------------------------------------------------
