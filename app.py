@@ -353,7 +353,12 @@ def site_broadcasts():
 def site_auth_status():
     if not _site_authorized():
         return jsonify({"error": "Unauthorized"}), 401
-    return jsonify({"connected": sy_client.is_authenticated()})
+    try:
+        # A cookie alone is not enough: confirm this session can read a workspace.
+        sy_client.list_broadcasts()
+    except Exception:
+        return jsonify({"connected": False})
+    return jsonify({"connected": True})
 
 
 @app.route("/site/auth/request", methods=["POST"])
