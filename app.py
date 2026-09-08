@@ -600,9 +600,9 @@ def api_browse():
 # ------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # use_reloader=False prevents Flask from killing background download threads on file changes
-    # bind to 0.0.0.0 so remote browsers can reach the server
-    host = os.environ.get("HOST", "0.0.0.0")
+    # use_reloader=False prevents Flask from killing background download threads on file changes.
+    # The reverse tunnel reaches loopback; do not expose the worker directly.
+    host = os.environ.get("HOST", "127.0.0.1")
     # The auto-start service uses the Site tunnel's local target by default.
     # PORT remains configurable for local development.
     port = int(os.environ.get("PORT", "5003"))

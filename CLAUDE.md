@@ -249,7 +249,7 @@ systemctl daemon-reload && systemctl enable streamyard && systemctl start stream
 ### Notes
 - The `.env` file is not in git — back it up before destroying/rebuilding the droplet (`cp .env /tmp/` then restore after clone)
 - GitHub repo is public so no token needed to clone
-- The app binds to `0.0.0.0:5001` — make sure port 5001 is open in DigitalOcean's firewall if connections are refused
+  - The current Windows worker binds to `127.0.0.1:5003` and is reached through the authenticated reverse tunnel.
 - `session.pkl` (StreamYard auth cookies) is also not in git — after a fresh deploy you must log in once via the browser
 
 If the app crashes, check `journalctl -u streamyard -n 50` for the traceback before testing remote access.
