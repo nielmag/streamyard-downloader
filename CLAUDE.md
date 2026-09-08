@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Standalone Flask app (port 5001) for downloading StreamYard recordings to a local folder.
+Standalone Flask app (port 5003, the Site tunnel target) for downloading StreamYard recordings to a local folder.
 Produces three files per broadcast: `.mp4` video, `.vtt` transcript, `.docx` manuscript.
 
 Separate from the main `video-pipeline` webapp (port 5000).
@@ -28,7 +28,7 @@ Date format: local time, no zero-padding (e.g. `3-1-26`, `5-19-26`).
 
 ### As Windows Service (normal operation)
 The app runs as a persistent Windows Service named `StreamYardDownloader` (installed via NSSM).
-It starts automatically on Windows boot. Access at `http://localhost:5001`.
+It starts automatically on Windows boot and serves the Site tunnel at `http://127.0.0.1:5003`.
 
 Manage from an **admin PowerShell**:
 ```powershell
@@ -46,7 +46,7 @@ Logs: `streamyard_app\service.log` (rotates at 5 MB).
 ### As a manual terminal process (for debugging)
 ```
 cd streamyard_app
-venv\Scripts\python app.py    # http://localhost:5001
+venv\Scripts\python app.py    # http://127.0.0.1:5003
 ```
 
 `use_reloader=False` is set intentionally — Flask's auto-reloader kills background download threads.

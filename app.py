@@ -603,5 +603,7 @@ if __name__ == "__main__":
     # use_reloader=False prevents Flask from killing background download threads on file changes
     # bind to 0.0.0.0 so remote browsers can reach the server
     host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", "5001"))
+    # The auto-start service uses the Site tunnel's local target by default.
+    # PORT remains configurable for local development.
+    port = int(os.environ.get("PORT", "5003"))
     app.run(debug=True, host=host, port=port, use_reloader=False)
