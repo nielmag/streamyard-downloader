@@ -4,3 +4,4 @@ requests>=2.31
 anthropic>=0.40
 python-docx>=1.1
 assemblyai>=0.29
+yt-dlp>=2025.1.15

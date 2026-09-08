@@ -6,6 +6,7 @@ import logging
 import pickle
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -310,6 +311,7 @@ class StreamYardClient:
         broadcast_id: str,
         dest_path: Path,
         status_callback=None,
+        fallback_url: str | None = None,
     ) -> Path:
         """
         Download a broadcast video to dest_path.
@@ -323,7 +325,14 @@ class StreamYardClient:
         if status_callback:
             status_callback("Requesting download link from StreamYard...")
 
-        video_url = self.get_video_url(broadcast_id)
+        try:
+            video_url = self.get_video_url(broadcast_id)
+        except RuntimeError:
+            if not fallback_url:
+                raise
+            if status_callback:
+                status_callback("StreamYard VOD is unavailable; downloading the published YouTube recording...")
+            return self._download_youtube_fallback(fallback_url, dest_path)
 
         if status_callback:
             status_callback("Downloading video...")
@@ -350,4 +359,35 @@ class StreamYardClient:
             mb = dest_path.stat().st_size / 1024 / 1024
             status_callback(f"Download complete ({mb:.0f} MB)")
 
+        return dest_path
+
+    def _download_youtube_fallback(self, url: str, dest_path: Path) -> Path:
+        """Download a matching public YouTube output when StreamYard has no VOD."""
+        host = (urlparse(url).hostname or "").lower()
+        if host not in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}:
+            raise RuntimeError("StreamYard VOD is unavailable and no supported published-video fallback exists.")
+        try:
+            import yt_dlp
+        except ImportError as exc:
+            raise RuntimeError("YouTube fallback support is not installed on the worker.") from exc
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        options = {
+            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "merge_output_format": "mp4",
+            "outtmpl": str(dest_path.with_suffix(".%(ext)s")),
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "retries": 3,
+            "fragment_retries": 3,
+            "overwrites": False,
+        }
+        try:
+            with yt_dlp.YoutubeDL(options) as downloader:
+                downloader.download([url])
+        except Exception as exc:
+            raise RuntimeError(f"StreamYard VOD is unavailable and the published YouTube fallback failed: {exc}") from exc
+        if not dest_path.exists():
+            raise RuntimeError("The published YouTube recording did not produce an MP4 file.")
         return dest_path

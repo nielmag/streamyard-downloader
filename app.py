@@ -82,7 +82,7 @@ def _start_batch(selected: list[dict]) -> str:
         Path(dirs[key]).mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     batch_id = str(uuid.uuid4())
-    items = [{"broadcast_id": b["id"], "name": b["name"], "title": b["title"], "display_date": b["display_date"], "status": "pending", "message": "Waiting..."} for b in selected]
+    items = [{"broadcast_id": b["id"], "name": b["name"], "title": b["title"], "display_date": b["display_date"], "fallback_video_url": b.get("fallback_video_url"), "status": "pending", "message": "Waiting..."} for b in selected]
     with batches_lock:
         batches[batch_id] = {"items": items, "dirs": dirs}
     _save_batches()
@@ -113,6 +113,15 @@ def _build_name(title: str, started_at: str) -> str:
     """Build the filename stem: '{title} {M-D-YY}'."""
     date_str = _format_date(started_at)
     return _safe_filename(f"{title} {date_str}")
+
+
+def _youtube_fallback_url(broadcast: dict) -> str | None:
+    """Return the broadcast's published YouTube output, if StreamYard supplied one."""
+    for output in broadcast.get("outputs") or []:
+        url = output.get("platformLink")
+        if output.get("platform") == "youtube" and isinstance(url, str):
+            return url
+    return None
 
 
 def _update_item(batch_id: str, broadcast_id: str, status: str, message: str) -> None:
@@ -159,7 +168,7 @@ def _process_batch(batch_id: str) -> None:
         try:
             # 1. Download video
             _update_item(batch_id, bid, "downloading", "Requesting download link from StreamYard...")
-            sy_client.download_video(bid, video_path, status_callback=cb)
+            sy_client.download_video(bid, video_path, status_callback=cb, fallback_url=item.get("fallback_video_url"))
 
             # 2. Transcribe → VTT (tries StreamYard transcript first, falls back to AssemblyAI)
             _update_item(batch_id, bid, "transcribing", "Checking for StreamYard transcript...")
@@ -298,6 +307,7 @@ def api_broadcasts():
             "started_at": started_at,
             "display_date": dt.strftime("%-m/%-d/%y") if os.name != "nt" else dt.strftime("%#m/%#d/%y"),
             "name": _build_name(b.get("title", "Untitled"), started_at),
+            "fallback_video_url": _youtube_fallback_url(b),
         })
 
     return jsonify({"broadcasts": results})
@@ -345,6 +355,7 @@ def site_broadcasts():
             "started_at": started_at,
             "display_date": dt.strftime("%-m/%-d/%y") if os.name != "nt" else dt.strftime("%#m/%#d/%y"),
             "name": _build_name(b.get("title", "Untitled"), started_at),
+            "fallback_video_url": _youtube_fallback_url(b),
         })
     return jsonify({"broadcasts": results})
 
@@ -415,6 +426,7 @@ def download():
             "name": b["name"],
             "title": b["title"],
             "display_date": b["display_date"],
+            "fallback_video_url": b.get("fallback_video_url"),
             "status": "pending",
             "message": "Waiting...",
         }
