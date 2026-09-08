@@ -25,5 +25,7 @@ def transcribe_with_assemblyai(video_path: Path, cache_dir: Path, api_key: str, 
     if status_callback:
         status_callback("Exporting VTT from AssemblyAI...")
 
-    vtt_text = transcript.export_subtitles_vtt(chars_per_caption=30)
+    # Some spoken words exceed 30 characters. Use a readable caption size
+    # that accommodates them instead of failing the entire recording.
+    vtt_text = transcript.export_subtitles_vtt(chars_per_caption=120)
     return vtt_text
